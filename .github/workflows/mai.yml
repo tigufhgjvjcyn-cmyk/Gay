@@ -1,0 +1,161 @@
+name: RDP[span_2](start_span)[span_2](end_span)
+
+on:[span_3](start_span)[span_3](end_span)
+  workflow_dispatch:[span_4](start_span)[span_4](end_span)
+
+jobs:[span_5](start_span)[span_5](end_span)
+  secure-rdp:[span_6](start_span)[span_6](end_span)
+    runs-on: windows-2025
+    timeout-minutes: 3600[span_7](start_span)[span_7](end_span)
+
+    steps:[span_8](start_span)[span_8](end_span)
+      - name: Maximize Virtual RAM & CPU Performance
+        shell: powershell
+        run: |
+          Write-Host "Expanding Virtual Memory (Pagefile) to 32GB..."
+          $System = Get-WmiObject -Class Win32_ComputerSystem
+          $System.AutomaticManagedPagefile = $false
+          $System.Put()
+          Set-CimInstance -Query "Select * from Win32_PageFileSetting" -Property @{InitialSize = 32768; MaximumSize = 32768} -ErrorAction SilentlyContinue
+
+          Write-Host "Enabling High Performance Power Plan..."
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+
+      - name: Configure RDP[span_9](start_span)[span_9](end_span)
+        shell: powershell[span_10](start_span)[span_10](end_span)
+        run: |[span_11](start_span)[span_11](end_span)
+          $rdpPath = 'HKLM:\System\CurrentControlSet\Control\Terminal Server[span_12](start_span)'[span_12](end_span)
+          $tcpPath = 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp[span_13](start_span)'[span_13](end_span)
+
+          Set-ItemProperty -Path $rdpPath -Name 'fDenyTSConnections' -Value 0 -Force[span_14](start_span)[span_14](end_span)
+          Set-ItemProperty -Path $tcpPath -Name 'UserAuthentication' -Value 0 -Force[span_15](start_span)[span_15](end_span)
+          Set-ItemProperty -Path $tcpPath -Name 'SecurityLayer' -Value 0 -Force[span_16](start_span)[span_16](end_span)
+
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null[span_17](start_span)[span_17](end_span)
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389[span_18](start_span)[span_18](end_span)
+
+          if (Get-Service -Name TermService -ErrorAction SilentlyContinue) {[span_19](start_span)[span_19](end_span)
+              Restart-Service -Name TermService -Force[span_20](start_span)[span_20](end_span)
+          }[span_21](start_span)[span_21](end_span)
+
+      - name: Create RDP User[span_22](start_span)[span_22](end_span)
+        shell: powershell[span_23](start_span)[span_23](end_span)
+        run: |[span_24](start_span)[span_24](end_span)
+          $username = "Skyro[span_25](start_span)"[span_25](end_span)
+
+          $upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.ToCharArray()[span_26](start_span)[span_26](end_span)
+          $lower = 'abcdefghijklmnopqrstuvwxyz'.ToCharArray()[span_27](start_span)[span_27](end_span)
+          $numbers = '0123456789'.ToCharArray()[span_28](start_span)[span_28](end_span)
+          $special = '!@#$%^&*()-_=+[]{}:,.?'.ToCharArray()[span_29](start_span)[span_29](end_span)
+
+          $passwordChars = @()[span_30](start_span)[span_30](end_span)
+          $passwordChars += $upper | Get-Random -Count 4[span_31](start_span)[span_31](end_span)
+          $passwordChars += $lower | Get-Random -Count 4[span_32](start_span)[span_32](end_span)
+          $passwordChars += $numbers | Get-Random -Count 4[span_33](start_span)[span_33](end_span)
+          $passwordChars += $special | Get-Random -Count 4[span_34](start_span)[span_34](end_span)
+
+          $password = -join ($passwordChars | Sort-Object { Get-Random })[span_35](start_span)[span_35](end_span)
+          $securePassword = ConvertTo-SecureString $password -AsPlainText -Force[span_36](start_span)[span_36](end_span)
+
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {[span_37](start_span)[span_37](end_span)
+              Remove-LocalUser -Name $username[span_38](start_span)[span_38](end_span)
+          }[span_39](start_span)[span_39](end_span)
+
+          New-LocalUser `[span_40](start_span)[span_40](end_span)
+            -Name $username `[span_41](start_span)[span_41](end_span)[span_42](start_span)[span_42](end_span)
+            -Password $securePassword `[span_43](start_span)[span_43](end_span)[span_44](start_span)[span_44](end_span)
+            -AccountNeverExpires `[span_45](start_span)[span_45](end_span)[span_46](start_span)[span_46](end_span)
+            -PasswordNeverExpires `[span_47](start_span)[span_47](end_span)[span_48](start_span)[span_48](end_span)
+            -UserMayNotChangePassword[span_49](start_span)[span_49](end_span)
+
+          Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue[span_50](start_span)[span_50](end_span)
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue[span_51](start_span)[span_51](end_span)
+
+          if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {[span_52](start_span)[span_52](end_span)
+              throw "Failed to create RDP user.[span_53](start_span)"[span_53](end_span)
+          }[span_54](start_span)[span_54](end_span)
+
+          "RDP_CREDS=User: $username | Password: $password" |[span_55](start_span)[span_55](end_span)
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8[span_56](start_span)[span_56](end_span)
+
+      - name: Install Tailscale[span_57](start_span)[span_57](end_span)
+        shell: powershell[span_58](start_span)[span_58](end_span)
+        run: |[span_59](start_span)[span_59](end_span)
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi[span_60](start_span)"[span_60](end_span)
+          $installerPath = "$env:TEMP\tailscale.msi[span_61](start_span)"[span_61](end_span)
+
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath[span_62](start_span)[span_62](end_span)
+
+          Start-Process msiexec.exe `[span_63](start_span)[span_63](end_span)
+            -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" `[span_64](start_span)[span_64](end_span)[span_65](start_span)[span_65](end_span)
+            -Wait[span_66](start_span)[span_66](end_span)
+
+          Remove-Item $installerPath -Force[span_67](start_span)[span_67](end_span)
+
+      - name: Establish Tailscale Connection[span_68](start_span)[span_68](end_span)
+        shell: powershell[span_69](start_span)[span_69](end_span)
+        run: |[span_70](start_span)[span_70](end_span)
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `[span_71](start_span)[span_71](end_span)
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `[span_72](start_span)[span_72](end_span)
+            --hostname=gh-runner-$env:GITHUB_RUN_ID[span_73](start_span)[span_73](end_span)
+
+          $tsIP = $null[span_74](start_span)[span_74](end_span)
+          $retries = 0[span_75](start_span)[span_75](end_span)
+
+          while (-not $tsIP -and $retries -lt 10) {[span_76](start_span)[span_76](end_span)
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4[span_77](start_span)[span_77](end_span)
+
+              if (-not $tsIP) {[span_78](start_span)[span_78](end_span)
+                  Start-Sleep -Seconds 5[span_79](start_span)[span_79](end_span)
+              }[span_80](start_span)[span_80](end_span)
+
+              $retries++[span_81](start_span)[span_81](end_span)
+          }[span_82](start_span)[span_82](end_span)
+
+          if (-not $tsIP) {[span_83](start_span)[span_83](end_span)
+              Write-Error "Tailscale IP not assigned. Exiting.[span_84](start_span)"[span_84](end_span)
+              exit 1[span_85](start_span)[span_85](end_span)
+          }[span_86](start_span)[span_86](end_span)
+
+          "TAILSCALE_IP=$tsIP" | Out-File $env:GITHUB_ENV -Append -Encoding utf8[span_87](start_span)[span_87](end_span)
+
+      - name: Verify RDP Accessibility[span_88](start_span)[span_88](end_span)
+        shell: powershell[span_89](start_span)[span_89](end_span)
+        run: |[span_90](start_span)[span_90](end_span)
+          $connected = $false[span_91](start_span)[span_91](end_span)
+
+          for ($i = 1; $i -le 6; $i++) {[span_92](start_span)[span_92](end_span)
+              $result = Test-NetConnection `[span_93](start_span)[span_93](end_span)
+                -ComputerName $env:TAILSCALE_IP `[span_94](start_span)[span_94](end_span)
+                -Port 3389 `[span_95](start_span)[span_95](end_span)
+                -WarningAction SilentlyContinue[span_96](start_span)[span_96](end_span)
+
+              if ($result.TcpTestSucceeded) {[span_97](start_span)[span_97](end_span)
+                  $connected = $true[span_98](start_span)[span_98](end_span)
+                  break[span_99](start_span)[span_99](end_span)
+              }[span_100](start_span)[span_100](end_span)
+
+              Start-Sleep -Seconds 5[span_101](start_span)[span_101](end_span)
+          }[span_102](start_span)[span_102](end_span)
+
+          if (-not $connected) {[span_103](start_span)[span_103](end_span)
+              throw "RDP port 3389 is not reachable.[span_104](start_span)"[span_104](end_span)
+          }[span_105](start_span)[span_105](end_span)
+
+      - name: Maintain Connection[span_106](start_span)[span_106](end_span)
+        shell: powershell[span_107](start_span)[span_107](end_span)
+        run: |[span_108](start_span)[span_108](end_span)
+          Write-Host "[span_109](start_span)"[span_109](end_span)
+          Write-Host "======================================[span_110](start_span)"[span_110](end_span)
+          Write-Host "RDP ACCESS[span_111](start_span)"[span_111](end_span)
+          Write-Host "======================================[span_112](start_span)"[span_112](end_span)
+          Write-Host "Address : $env:TAILSCALE_IP[span_113](start_span)"[span_113](end_span)
+          Write-Host "Username: Skyro[span_114](start_span)"[span_114](end_span)
+          Write-Host "Credentials: $env:RDP_CREDS[span_115](start_span)"[span_115](end_span)
+          Write-Host "======================================[span_116](start_span)"[span_116](end_span)
+          Write-Host "[span_117](start_span)"[span_117](end_span)
+
+          while ($true) {[span_118](start_span)[span_118](end_span)
+              Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] RDP Active[span_119](start_span)"[span_119](end_span)
+              Start-Sleep -Seconds 300[span_120](start_span)[span_120](end_span)
+          }[span_121](start_span)[span_121](end_span)
