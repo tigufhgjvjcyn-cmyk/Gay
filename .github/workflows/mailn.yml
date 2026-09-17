@@ -1,0 +1,97 @@
+name: RDP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Configure RDP
+        shell: powershell
+        run: |
+          $rdpPath = 'HKLM:\System\CurrentControlSet\Control\Terminal Server'
+          $tcpPath = 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+
+          Set-ItemProperty -Path $rdpPath -Name 'fDenyTSConnections' -Value 0 -Force
+          Set-ItemProperty -Path $tcpPath -Name 'UserAuthentication' -Value 0 -Force
+          Set-ItemProperty -Path $tcpPath -Name 'SecurityLayer' -Value 0 -Force
+
+          netsh advfirewall firewall delete rule name="RDP-Ngrok" 2>$null
+          netsh advfirewall firewall add rule name="RDP-Ngrok" dir=in action=allow protocol=TCP localport=3389
+
+          if (Get-Service -Name TermService -ErrorAction SilentlyContinue) {
+              Restart-Service -Name TermService -Force
+          }
+
+      - name: Create RDP User
+        shell: powershell
+        run: |
+          $username = "Phuongnam"
+
+          $upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.ToCharArray()
+          $lower = 'abcdefghijklmnopqrstuvwxyz'.ToCharArray()
+          $numbers = '0123456789'.ToCharArray()
+          $special = '!@#$%^&*()-_=+[]{}:,.?'.ToCharArray()
+
+          $passwordChars = @()
+          $passwordChars += $upper | Get-Random -Count 4
+          $passwordChars += $lower | Get-Random -Count 4
+          $passwordChars += $numbers | Get-Random -Count 4
+          $passwordChars += $special | Get-Random -Count 4
+
+          $password = -join ($passwordChars | Sort-Object { Get-Random })
+          $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+              Remove-LocalUser -Name $username
+          }
+
+          New-LocalUser `
+            -Name $username `
+            -Password $securePassword `
+            -AccountNeverExpires `
+            -PasswordNeverExpires `
+            -UserMayNotChangePassword
+
+          Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
+
+          if (-not (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
+              throw "Failed to create RDP user."
+          }
+
+          "RDP_CREDS=User: $username | Password: $password" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install and Run Ngrok
+        shell: powershell
+        run: |
+          Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
+          Expand-Archive ngrok.zip -DestinationPath .
+          .\ngrok.exe config add-authtoken 3JRvCd68P4SRP35hxrOhDAV8fCf_4kUELML6QyrVs4TN3zPcs
+          Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389" -WindowStyle Hidden
+          Start-Sleep -Seconds 10
+          $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels"
+          $tcp_url = $response.tunnels[0].public_url
+          $tcp_url = $tcp_url -replace 'tcp://', ''
+          "NGROK_URL=$tcp_url" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Maintain Connection
+        shell: powershell
+        run: |
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "RDP ACCESS (NGROK)"
+          Write-Host "======================================"
+          Write-Host "Address : $env:NGROK_URL"
+          Write-Host "Credentials: $env:RDP_CREDS"
+          Write-Host "======================================"
+          Write-Host ""
+
+          while ($true) {
+              Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] RDP Active"
+              Start-Sleep -Seconds 300
+          }
