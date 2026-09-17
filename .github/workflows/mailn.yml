@@ -70,12 +70,31 @@ jobs:
         shell: powershell
         run: |
           Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
-          Expand-Archive ngrok.zip -DestinationPath .
+          Expand-Archive ngrok.zip -DestinationPath . -Force
           .\ngrok.exe config add-authtoken 3JRvCd68P4SRP35hxrOhDAV8fCf_4kUELML6QyrVs4TN3zPcs
-          Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389" -WindowStyle Hidden
-          Start-Sleep -Seconds 10
-          $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels"
-          $tcp_url = $response.tunnels[0].public_url
+          
+          Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389" -RedirectStandardError "ngrok_err.log" -WindowStyle Hidden
+          
+          $tcp_url = $null
+          $retry = 0
+          while (-not $tcp_url -and $retry -lt 15) {
+              Start-Sleep -Seconds 2
+              try {
+                  $response = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -ErrorAction Stop
+                  if ($response.tunnels.length -gt 0) {
+                      $tcp_url = $response.tunnels[0].public_url
+                  }
+              } catch {
+                  $retry++
+              }
+          }
+
+          if (-not $tcp_url) {
+              Write-Host "=== NGROK ERROR LOG ==="
+              Get-Content -Path "ngrok_err.log" -ErrorAction SilentlyContinue
+              throw "Ngrok khong the khoi tao tunnel hoac authtoken khong hop le."
+          }
+
           $tcp_url = $tcp_url -replace 'tcp://', ''
           "NGROK_URL=$tcp_url" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
@@ -87,6 +106,7 @@ jobs:
           Write-Host "RDP ACCESS (NGROK)"
           Write-Host "======================================"
           Write-Host "Address : $env:NGROK_URL"
+          Write-Host "Username: Phuongnam"
           Write-Host "Credentials: $env:RDP_CREDS"
           Write-Host "======================================"
           Write-Host ""
