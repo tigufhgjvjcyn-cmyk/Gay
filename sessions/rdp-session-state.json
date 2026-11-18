@@ -1,0 +1,16 @@
+{
+  "machineId": "may-phu-2",
+  "releaseTag": "aistv-storage-may-phu-2",
+  "user": "runneradmin",
+  "sid": "S-1-5-21-1280602335-643053282-3184619455-500",
+  "password": "Aistv@2026",
+  "passwordSource": "fixed_input",
+  "windowsImage": "windows-2022",
+  "osBuild": "20348",
+  "driveLetter": "X",
+  "tailscaleIp": "100.65.167.49",
+  "durationMinutes": 300,
+  "startUtc": "2026-11-17T20:15:10.5807683Z",
+  "runId": "44166907617",
+  "lastUpdatedUtc": "2026-11-18T01:13:39.2910803Z"
+}
